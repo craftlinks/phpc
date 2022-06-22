@@ -49,8 +49,8 @@ pub fn main() anyerror!void {
     const ptr = try allocator.alloc(u64, 512);
     defer allocator.free(ptr);
 
-    const jmax = 3;
-    const imax = 3;
+    const jmax = 1024;
+    const imax = 1024;
 
     var e = try ArrayClassic2D(allocator, f64, jmax, imax);
     defer ArrayClassic2DFree(allocator, e);
@@ -109,6 +109,8 @@ pub fn ArrayClassic2DFree(allocator: Allocator, array: anytype) void {
 pub fn ArrayContiguous2D(allocator: Allocator, comptime T: type, jmax: usize, imax: usize) ![][]T {
     
     const array: [][]T = try allocator.alloc([]T, jmax);
+    // Note, Geert: this is actually wrong, array[0] should not point to the full memory slice!!
+    // Needs to be fixed in the future, see your ArrayContiguous2DOne implementation.
     array[0] = try allocator.alloc(T, jmax * imax);
 
     for (array[1..]) |*row, idx| {
