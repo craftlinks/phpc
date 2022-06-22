@@ -43,20 +43,17 @@ pub fn main() anyerror!void {
 
     try testing.expectEqual(c, d);
 
-    // TODO, Geert: implement multidimensional array.
     var gpa = GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     const ptr = try allocator.alloc(u64, 512);
     defer allocator.free(ptr);
 
-    
-    
-    const jmax = 2;
-    const imax = 2;
+    const jmax = 3;
+    const imax = 3;
 
     var e = try ArrayClassic2D(allocator, f64, jmax, imax);
-    defer ArrayClassic2DFree(allocator, e, jmax);
+    defer ArrayClassic2DFree(allocator, e);
     e[0][0] = 1.0;
     e[jmax-1][imax-1] = 1.0;
     
@@ -66,11 +63,23 @@ pub fn main() anyerror!void {
     f[jmax-1][imax-1] = 1.0;
 
     try testing.expectEqual(e[0][0], f[0][0]);
+    try testing.expectEqual(e[jmax-1][imax-1], f[jmax-1][imax-1]);
+
+    var g = try ArrayContiguous2DOne(allocator, f64, jmax, imax);
+    defer ArrayContiguous2DOneFree(allocator, g);
+
+    g[0][0] = 1.0;
+    g[jmax-1][imax-1] = 1.0;
+
+
+    try testing.expectEqual(e[0][0], g[0][0]);
+    try testing.expectEqual(e[jmax-1][imax-1], g[jmax-1][imax-1]);
 
 }
 
-// TODO, Geert: can these functions be put in structures?
+//------------------------------------------------------------------------------
 
+// TODO, Geert: put the functions in separate structs for convenience.
 
 // Conventional way of allocating a 2D array.
 
@@ -78,21 +87,19 @@ pub fn ArrayClassic2D(allocator: Allocator, comptime T: type, jmax: usize, imax:
     
     const array = try allocator.alloc([]T, jmax);
 
-    // TODO, Geert: you can just (for) loop over the slice instead of jmax.
-    var j: usize = 0;
-    while (j < jmax) : (j+=1) {
-        array[j] = try allocator.alloc(T, imax);
+    for (array) |*row| {
+        row.* = try allocator.alloc(T, imax);
     }
 
     return array;
-
 }
-// TODO, Geert: you don't need the jmax, because this is a slice.
-pub fn ArrayClassic2DFree(allocator: Allocator, array: anytype, jmax: usize) void {
-    var j: usize = 0;
-    while (j < jmax) : (j+=1) {
-        allocator.free(array[j]);
+
+pub fn ArrayClassic2DFree(allocator: Allocator, array: anytype) void {
+    
+    for (array) |row| {
+        allocator.free(row);
     }
+
     allocator.free(array);
 }
 
@@ -102,17 +109,15 @@ pub fn ArrayClassic2DFree(allocator: Allocator, array: anytype, jmax: usize) voi
 pub fn ArrayContiguous2D(allocator: Allocator, comptime T: type, jmax: usize, imax: usize) ![][]T {
     
     const array: [][]T = try allocator.alloc([]T, jmax);
-
     array[0] = try allocator.alloc(T, jmax * imax);
 
-    var j: usize = 1;
-    while (j < jmax) : (j+=1) {
-        array[j] = array[0][(j-1)..(j-1 + imax)];
+    for (array[1..]) |*row, idx| {
+        row.* = array[0][idx*imax..(idx+1) * imax];
     }
     
     return array;
-
 }
+
 
 pub fn ArrayContiguous2DFree(allocator: Allocator, array: anytype) void {
     
@@ -120,7 +125,27 @@ pub fn ArrayContiguous2DFree(allocator: Allocator, array: anytype) void {
     allocator.free(array);
 }
 
-// Allocating a single contiguous 2D array.
-// TODO, Geert: implement multidimensional array.
+// Allocating a contiguous 2D array with one allocation.
 
-test "expectEqual nested array" {}
+pub fn ArrayContiguous2DOne(allocator: Allocator, comptime T: type, jmax: usize, imax: usize) ![][]T {
+    
+    const runtime_allignment = 1;
+    const number_of_bytes = jmax * @sizeOf(*f64) + jmax * imax * @sizeOf(f64);
+    var array_of_bytes: []u8 = try allocator.allocBytes(runtime_allignment, number_of_bytes, 0, @returnAddress());
+    var array = @ptrCast([][]T, @alignCast(@alignOf([][]T),array_of_bytes));
+    
+    array[0] = @ptrCast([]T, array_of_bytes[jmax * @sizeOf(*f64)..jmax * @sizeOf(*f64) + imax * @sizeOf(f64)]); 
+    
+    var j: usize = 1;
+    while (j <  jmax) : (j+=1) {
+        array[j].ptr = array[j-1].ptr + imax;
+        array[j].len = imax;
+    }
+
+    return array;
+}
+
+pub fn ArrayContiguous2DOneFree(allocator: Allocator, array: anytype) void {
+    
+    allocator.free(@ptrCast([]u8,array));
+}
