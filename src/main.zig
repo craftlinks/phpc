@@ -3,8 +3,6 @@ const Allocator = std.mem.Allocator;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
 const testing = std.testing;
 
-// TODO, Geert: make max use of comptime execution,is it possible to initialize the arrays at comptime?
-
 pub fn main() anyerror!void {
     const a = [2][2]f32{
         [_]f32{ 1.0, 0.0 },
@@ -113,9 +111,6 @@ pub fn ArrayClassic2D(comptime T: type) type {
         }
     };
 }
-
-
-
 
 // Allocating a contiguous 2D array.
 
