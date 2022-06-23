@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
 const testing = std.testing;
 
+// TODO, Geert: make max use of comptime execution,is it possible to initialize the arrays at comptime?
+
 pub fn main() anyerror!void {
     const a = [2][2]f32{
         [_]f32{ 1.0, 0.0 },
@@ -52,102 +54,134 @@ pub fn main() anyerror!void {
     const jmax = 1024;
     const imax = 1024;
 
-    var e = try ArrayClassic2D(allocator, f64, jmax, imax);
-    defer ArrayClassic2DFree(allocator, e);
-    e[0][0] = 1.0;
-    e[jmax-1][imax-1] = 1.0;
+    var e = try ArrayClassic2D(f64).new(allocator, jmax, imax);
+    defer e.free(allocator);
+    e.array[0][0] = 1.0;
+    e.array[jmax-1][imax-1] = 1.0;
     
-    var f = try ArrayContiguous2D(allocator, f64, jmax, imax);
-    defer ArrayContiguous2DFree(allocator, f);
-    f[0][0] = 1.0;
-    f[jmax-1][imax-1] = 1.0;
+    var f = try ArrayContiguous2D(f64).new(allocator, jmax, imax);
+    defer f.free(allocator);
+    f.array[0][0] = 1.0;
+    f.array[jmax-1][imax-1] = 1.0;
 
-    try testing.expectEqual(e[0][0], f[0][0]);
-    try testing.expectEqual(e[jmax-1][imax-1], f[jmax-1][imax-1]);
+    try testing.expectEqual(e.array[0][0], f.array[0][0]);
+    try testing.expectEqual(e.array[jmax-1][imax-1], f.array[jmax-1][imax-1]);
 
-    var g = try ArrayContiguous2DOne(allocator, f64, jmax, imax);
-    defer ArrayContiguous2DOneFree(allocator, g);
+    var g = try ArrayContiguous2DOne(f64).new(allocator, jmax, imax);
+    defer g.free(allocator);
 
-    g[0][0] = 1.0;
-    g[jmax-1][imax-1] = 1.0;
+    g.array[0][0] = 1.0;
+    g.array[jmax-1][imax-1] = 1.0;
 
-
-    try testing.expectEqual(e[0][0], g[0][0]);
-    try testing.expectEqual(e[jmax-1][imax-1], g[jmax-1][imax-1]);
+    try testing.expectEqual(e.array[0][0], g.array[0][0]);
+    try testing.expectEqual(e.array[jmax-1][imax-1], g.array[jmax-1][imax-1]);
 
 }
 
 //------------------------------------------------------------------------------
 
-// TODO, Geert: put the functions in separate structs for convenience.
-
 // Conventional way of allocating a 2D array.
 
-pub fn ArrayClassic2D(allocator: Allocator, comptime T: type, jmax: usize, imax: usize) ![][]T {
-    
-    const array = try allocator.alloc([]T, jmax);
+pub fn ArrayClassic2D(comptime T: type) type {
 
-    for (array) |*row| {
-        row.* = try allocator.alloc(T, imax);
-    }
+    return struct {
+        array: [][]T,
+        const Self = @This();
 
-    return array;
+        fn new(allocator: Allocator , jmax: usize, imax: usize) !Self {
+            
+            // allocate memory for row pointers
+            const array = try allocator.alloc([]T, jmax);
+
+            // allocate memory for the actual row data
+            for (array) |*row| {
+                row.* = try allocator.alloc(T, imax);
+            }
+
+            return Self {
+                .array =  array,
+            };
+        }
+
+        fn free(self: Self, allocator: Allocator) void {
+            
+            for (self.array) |row| {
+                allocator.free(row);
+            }
+            
+            allocator.free(self.array);
+        }
+    };
 }
 
-pub fn ArrayClassic2DFree(allocator: Allocator, array: anytype) void {
-    
-    for (array) |row| {
-        allocator.free(row);
-    }
 
-    allocator.free(array);
-}
 
 
 // Allocating a contiguous 2D array.
 
-pub fn ArrayContiguous2D(allocator: Allocator, comptime T: type, jmax: usize, imax: usize) ![][]T {
-    
-    const array: [][]T = try allocator.alloc([]T, jmax);
-    // Note, Geert: this is actually wrong, array[0] should not point to the full memory slice!!
-    // Needs to be fixed in the future, see your ArrayContiguous2DOne implementation.
-    array[0] = try allocator.alloc(T, jmax * imax);
+pub fn ArrayContiguous2D(comptime T: type) type {
 
-    for (array[1..]) |*row, idx| {
-        row.* = array[0][idx*imax..(idx+1) * imax];
-    }
+    return struct {
+        array: [][]T,
+        data: []T,
+        const Self = @This();
     
-    return array;
+        fn new(allocator: Allocator, jmax: usize, imax: usize) !Self {
+        
+            // allocate memory for row pointers
+            const array: [][]T = try allocator.alloc([]T, jmax);
+            
+            // allocate memory for row data
+            var data = try allocator.alloc(T, jmax * imax);
+
+            // fill in the row pointers
+            for (array[0..]) |*row, idx| {
+                row.* = data[idx*imax..(idx+1)*imax];
+            }
+            
+            return Self {
+                .array = array,
+                .data = data,
+            };
+        }
+
+        fn free(self: Self, allocator: Allocator) void {
+            allocator.free(self.data);
+            allocator.free(self.array);
+        }
+    };
 }
 
-
-pub fn ArrayContiguous2DFree(allocator: Allocator, array: anytype) void {
-    
-    allocator.free(array[0]);
-    allocator.free(array);
-}
 
 // Allocating a contiguous 2D array with one allocation.
 
-pub fn ArrayContiguous2DOne(allocator: Allocator, comptime T: type, jmax: usize, imax: usize) ![][]T {
-    
-    const runtime_allignment = 1;
-    const number_of_bytes = jmax * @sizeOf(*f64) + jmax * imax * @sizeOf(f64);
-    var array_of_bytes: []u8 = try allocator.allocBytes(runtime_allignment, number_of_bytes, 0, @returnAddress());
-    var array = @ptrCast([][]T, @alignCast(@alignOf([][]T),array_of_bytes));
-    
-    array[0] = @ptrCast([]T, array_of_bytes[jmax * @sizeOf(*f64)..jmax * @sizeOf(*f64) + imax * @sizeOf(f64)]); 
-    
-    var j: usize = 1;
-    while (j <  jmax) : (j+=1) {
-        array[j].ptr = array[j-1].ptr + imax;
-        array[j].len = imax;
-    }
+pub fn ArrayContiguous2DOne(comptime T: type) type {
+    return struct {
+        array: [][]T,
+        const Self = @This();
 
-    return array;
-}
+        fn new(allocator: Allocator, jmax: usize, imax: usize) !Self {
 
-pub fn ArrayContiguous2DOneFree(allocator: Allocator, array: anytype) void {
-    
-    allocator.free(@ptrCast([]u8,array));
+            const runtime_allignment = 1;
+            const number_of_bytes = jmax * @sizeOf(*f64) + jmax * imax * @sizeOf(f64);
+            var array_of_bytes: []u8 = try allocator.allocBytes(runtime_allignment, number_of_bytes, 0, @returnAddress());
+            var array = @ptrCast([][]T, @alignCast(@alignOf([][]T),array_of_bytes));
+            
+            array[0] = @ptrCast([]T, array_of_bytes[jmax * @sizeOf(*f64)..jmax * @sizeOf(*f64) + imax * @sizeOf(f64)]); 
+            
+            var j: usize = 1;
+            while (j <  jmax) : (j+=1) {
+                array[j].ptr = array[j-1].ptr + imax;
+                array[j].len = imax;
+            } 
+
+            return Self {
+                .array = array,
+            };
+        }
+
+        fn free(self: Self, allocator: Allocator) void {
+            allocator.free(@ptrCast([]u8,self.array));
+        }
+    };
 }
