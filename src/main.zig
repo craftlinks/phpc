@@ -179,6 +179,64 @@ pub fn ArrayContiguous2DOne(comptime T: type) type {
     };
 }
 
+
+pub fn bench(comptime T: type) !void {
+    // array dimensions
+    const IMAX = 2002;
+    const JMAX = 2002;
+
+    var gpa = GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // zero intialize 2D arrays
+    var x = try T.new(allocator, JMAX, IMAX);
+    defer x.free(allocator);
+    var xnew = try T.new(allocator, JMAX, IMAX);
+    defer xnew.free(allocator);
+    var flush = try ArrayList(f64).initCapacity(allocator, JMAX * IMAX * 10);
+    defer flush.deinit();
+
+     // set center block of memory to a larger value
+    for (x.array[JMAX/2-5..JMAX/2+5]) |*array| {
+        for (array.*[IMAX/2 - 5..IMAX/2+5]) |*el| {
+            el.* = 400.0;
+        }
+    }
+
+    // ITERATION
+    var it: usize = 0;
+    const start = try Instant.now();
+    while (it <= 10000) : (it += 1) {
+        
+        // Flushing the cache
+        for (flush.items) |*el| {
+            el.* = 1.0;
+        }
+
+        var j: usize = 1;
+        while (j < JMAX-1) : (j += 1) {
+            var i: usize = 1;
+            while (i < IMAX-1) : (i += 1) {
+                // Calculation kernel
+                xnew.array[j][i] = ( x.array[j][i] + x.array[j][i-1] + x.array[j][i+1] + x.array[j-1][i] + x.array[j+1][i]) / 5.0;
+            }
+        }
+
+        var xtmp = x.array;
+        x.array = xnew.array;
+        xnew.array = xtmp;
+
+        if (it % 1000 == 0) {
+            std.debug.print("Iter {}\n", .{it});
+        }
+    }
+    const end = try Instant.now();
+    const elapsed = end.since(start) / 1000_000_000;
+    std.debug.print("Elapsed (s) {}", .{elapsed});
+
+}
+
 // ===========================================================================
 // Run with: `zig build run`
 
@@ -253,64 +311,20 @@ pub fn main() anyerror!void {
 
     // ===========================================================================
     // Benchmarks
+    // zig build run -Drelease-fast=true
 
-    // array dimensions
-    const IMAX = 2002;
-    const JMAX = 2002;
+    std.debug.print("\nArrayClassic2D\n", .{});
+    const classic = ArrayClassic2D(f64);
+    try bench(classic);
 
-    // zero intialize 2D arrays
-    var x = try ArrayContiguous2DOne(f64).new(allocator, JMAX, IMAX);
-    defer x.free(allocator);
-    var xnew = try ArrayContiguous2DOne(f64).new(allocator, JMAX, IMAX);
-    defer xnew.free(allocator);
-    var flush = try ArrayList(f64).initCapacity(allocator, JMAX * IMAX * 10);
-    defer flush.deinit();
 
-     // set center block of memory to a larger value
-    for (x.array[JMAX/2-5..JMAX/2+5]) |*array| {
-        for (array.*[IMAX/2 - 5..IMAX/2+5]) |*el| {
-            el.* = 400.0;
-        }
-    }
+    std.debug.print("\nArrayContiguous2D\n", .{});
+    const ac2d = ArrayContiguous2D(f64);
+    try bench(ac2d);
 
-    // ITERATION
-    var it: usize = 0;
-    const start = try Instant.now();
-    while (it <= 10000) : (it += 1) {
-        
-        // Flushing the cache
-        for (flush.items) |*el| {
-            el.* = 1.0;
-        }
-
-        var j: usize = 1;
-        while (j < JMAX-1) : (j += 1) {
-            var i: usize = 1;
-            while (i < IMAX-1) : (i += 1) {
-                // Calculation kernel
-                xnew.array[j][i] = ( x.array[j][i] + x.array[j][i-1] + x.array[j][i+1] + x.array[j-1][i] + x.array[j+1][i]) / 5.0;
-            }
-        }
-
-        // for (xnew.array[JMAX/2-5..JMAX/2+5]) |array| {
-        //     for (array[IMAX/2 - 5..IMAX/2+5]) |el| {
-        //         std.debug.print("{}   ",.{el});
-        //     }
-        //     std.debug.print("\n", .{});
-        // }
-
-        var xtmp = x.array;
-        x.array = xnew.array;
-        xnew.array = xtmp;
-
-        if (it % 100 == 0) {
-            std.debug.print("Iter {}\n", .{it});
-        }
-    }
-    const end = try Instant.now();
-    const elapsed = end.since(start) / 1000_000_000;
-    std.debug.print("Elapsed (s) {}", .{elapsed});
-
+    std.debug.print("\nArrayContiguous2DOne\n", .{});
+    const ac2d_one = ArrayContiguous2DOne(f64);
+    try bench(ac2d_one);
 }
 
 // END ========================================================================        
