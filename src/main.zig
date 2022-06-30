@@ -1,4 +1,5 @@
 const std = @import("std");
+const mem = @import("std").mem;
 const Allocator = std.mem.Allocator;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
 const ArrayList = std.ArrayList;
@@ -180,6 +181,25 @@ pub fn ArrayContiguous2DOne(comptime T: type) type {
 }
 
 
+// !! Not recommended because allocated on the stack -> stack overflows 
+pub fn ZigMulti(comptime T: type) type {
+    const IMAX = 52;
+    const JMAX = 52;
+    
+    return struct {
+        array: [JMAX][IMAX]T,
+        const Self = @This();
+        
+        fn new() Self {
+            const zero_row = [_]T{0.0}**IMAX;
+            return Self{
+                .array = [_][IMAX]T{zero_row}**JMAX,
+            };
+        }
+    };
+} 
+
+
 pub fn bench(comptime T: type) !void {
     // array dimensions
     const IMAX = 2002;
@@ -196,6 +216,7 @@ pub fn bench(comptime T: type) !void {
     defer xnew.free(allocator);
     var flush = try ArrayList(f64).initCapacity(allocator, JMAX * IMAX * 10);
     defer flush.deinit();
+
 
      // set center block of memory to a larger value
     for (x.array[JMAX/2-5..JMAX/2+5]) |*array| {
@@ -286,8 +307,8 @@ pub fn main() anyerror!void {
     const ptr = try allocator.alloc(u64, 512);
     defer allocator.free(ptr);
 
-    const jmax = 10;
-    const imax = 10;
+    const jmax = 2002;
+    const imax = 2002;
 
     var e = try ArrayClassic2D(f64).new(allocator, jmax, imax);
     defer e.free(allocator);
@@ -309,7 +330,7 @@ pub fn main() anyerror!void {
 
     try expectEqual(@TypeOf(f.array), f.array, g.array);
 
-    // ===========================================================================
+    // =========================================================================
     // Benchmarks
     // zig build run -Drelease-fast=true
 
@@ -325,6 +346,38 @@ pub fn main() anyerror!void {
     std.debug.print("\nArrayContiguous2DOne\n", .{});
     const ac2d_one = ArrayContiguous2DOne(f64);
     try bench(ac2d_one);
+
+    // TODO, Geert: Benchmark the Zig ArrayList
+    // ArrayList(comptime T: type), so: 
+    const zig2d = ArrayList(ArrayList(f64));
+    var x = try zig2d.initCapacity(allocator, jmax);
+    // memory freeing situation unclear atm... tip: see toOwnedSlice
+    defer x.deinit();
+    var xnew = try zig2d.initCapacity(allocator, jmax);
+    defer xnew.deinit();
+
+    try zeroInit(x, imax, allocator);
+    try zeroInit(xnew, imax, allocator);
+
+
+    // set center block of memory to a larger value
+    // for (x.items[jmax/2-5..jmax/2+5]) |*array| {
+    //     for (array.*.items[imax/2 - 5..imax/2+5]) |*el| {
+    //         el.* = 400.0;
+    //     }
+    // }
+
 }
 
 // END ========================================================================        
+
+pub fn zeroInit(x: anytype, imax: usize, allocator: Allocator) !void {
+    for (x.items) |*array| {
+        const array1d = ArrayList(f64);
+        const _array = try array1d.initCapacity(allocator, imax);
+        for (_array.items) |*item| {
+            item.* = 0.0;
+        }
+        array.* = _array;
+    }
+}
