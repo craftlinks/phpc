@@ -1,7 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
+const ArrayList = std.ArrayList;
 const testing = std.testing;
+const Instant = std.time.Instant;
 
 //
 // Multidimensional array implementations from naive to using a flat array.
@@ -248,6 +250,67 @@ pub fn main() anyerror!void {
     g.array[jmax - 1][imax - 1] = 1.0;
 
     try expectEqual(@TypeOf(f.array), f.array, g.array);
+
+    // ===========================================================================
+    // Benchmarks
+
+    // array dimensions
+    const IMAX = 2002;
+    const JMAX = 2002;
+
+    // zero intialize 2D arrays
+    var x = try ArrayContiguous2DOne(f64).new(allocator, JMAX, IMAX);
+    defer x.free(allocator);
+    var xnew = try ArrayContiguous2DOne(f64).new(allocator, JMAX, IMAX);
+    defer xnew.free(allocator);
+    var flush = try ArrayList(f64).initCapacity(allocator, JMAX * IMAX * 10);
+    defer flush.deinit();
+
+     // set center block of memory to a larger value
+    for (x.array[JMAX/2-5..JMAX/2+5]) |*array| {
+        for (array.*[IMAX/2 - 5..IMAX/2+5]) |*el| {
+            el.* = 400.0;
+        }
+    }
+
+    // ITERATION
+    var it: usize = 0;
+    const start = try Instant.now();
+    while (it <= 10000) : (it += 1) {
+        
+        // Flushing the cache
+        for (flush.items) |*el| {
+            el.* = 1.0;
+        }
+
+        var j: usize = 1;
+        while (j < JMAX-1) : (j += 1) {
+            var i: usize = 1;
+            while (i < IMAX-1) : (i += 1) {
+                // Calculation kernel
+                xnew.array[j][i] = ( x.array[j][i] + x.array[j][i-1] + x.array[j][i+1] + x.array[j-1][i] + x.array[j+1][i]) / 5.0;
+            }
+        }
+
+        // for (xnew.array[JMAX/2-5..JMAX/2+5]) |array| {
+        //     for (array[IMAX/2 - 5..IMAX/2+5]) |el| {
+        //         std.debug.print("{}   ",.{el});
+        //     }
+        //     std.debug.print("\n", .{});
+        // }
+
+        var xtmp = x.array;
+        x.array = xnew.array;
+        xnew.array = xtmp;
+
+        if (it % 100 == 0) {
+            std.debug.print("Iter {}\n", .{it});
+        }
+    }
+    const end = try Instant.now();
+    const elapsed = end.since(start) / 1000_000_000;
+    std.debug.print("Elapsed (s) {}", .{elapsed});
+
 }
 
-// END ========================================================================
+// END ========================================================================        
